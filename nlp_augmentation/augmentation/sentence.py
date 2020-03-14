@@ -28,7 +28,7 @@ from absl import flags
 import numpy as np
 import tensorflow as tf
 
-from nlp_transformation.augmentation.word import word_level_augment
+from nlp_augmentation.augmentation.word import word_level_augment
 from utils import raw_data_utils
 
 

@@ -17,6 +17,8 @@ requirements = [
     "numpy==1.16.2",
     "tensor2tensor==1.8.0",
     "nltk>=3.4.5",
+    "requests>=2.23.0",
+    "tqdm>=4.43.0",
 ]
 
 setup_requirements = []

@@ -1,7 +1,10 @@
 from click import group, option
-from nlp_transformation.backtranslation.backtranslate import BackTranslate
+from nlp_augmentation.backtranslation.backtranslate import BackTranslate
 from zipfile import ZipFile
-
+from requests import get
+from tqdm import tqdm
+from pathlib import Path
+from tempfile import TemporaryFile
 
 ## run back translation
 ## sent level augmentation, which calls word translation
@@ -35,14 +38,15 @@ def download():
     block_size = 1024
     progress_bar = tqdm(total=total_size, unit="iB", unit_scale=True)
 
-    with open(filename, "wb") as file:
+    with TemporaryFile() as file:
         for data in request.iter_content(block_size):
             progress_bar.update(len(data))
             file.write(data)
 
-    progress_bar.close()
+        progress_bar.close()
+        file.seek(0)
 
-    ZipFile(filename).extract("checkpoints")
+        ZipFile(file).extractall(Path("~/.nlp_augmentation"))
 
 
 """ 

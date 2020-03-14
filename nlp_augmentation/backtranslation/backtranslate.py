@@ -3,8 +3,8 @@ from pathlib import Path
 from click import secho
 from tempfile import NamedTemporaryFile
 
-from nlp_transformation.backtranslation.postprocessor import SentToParagraph
-from nlp_transformation.backtranslation.preprocessor import SplitParagraphs
+from nlp_augmentation.backtranslation.postprocessor import SentToParagraph
+from nlp_augmentation.backtranslation.preprocessor import SplitParagraphs
 
 
 

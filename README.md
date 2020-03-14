@@ -29,3 +29,9 @@ Had to rename subwords vocab file in `/checkpoints` to `vocab.enfr.large.32768`
 ## UDA
 
 Originally from [Google Research](https://github.com/google-research/uda).
+
+1. Install the pre-trained translation models that allow UDA to forward-translate text passages and back-translate them into the original language:
+
+    ```
+    uda download
+    ```
