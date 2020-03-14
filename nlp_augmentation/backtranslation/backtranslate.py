@@ -6,10 +6,11 @@ from click import secho
 
 from nlp_augmentation.backtranslation.postprocessor import SentToParagraph
 from nlp_augmentation.backtranslation.preprocessor import SplitParagraphs
+from logging import info
 
 
 class BackTranslate:
-    def __init__(self, model_dir, replicas=1, worker_id=0, sampling_temp=0.8):
+    def __init__(self, model_dir, scratch_dir, replicas=1, worker_id=0, sampling_temp=0.8):
         """
         :param replicas: An argument for parallel preprocessing. For example, when replicas=3,
             we divide the data into three parts, and only process one part
@@ -23,14 +24,13 @@ class BackTranslate:
         self.worker_id = worker_id
         self.sampling_temp = sampling_temp
 
-        data_dir = Path("back_trans_data")
-        self.doc_len_dir = data_dir / "doc_len"
-        self.forward_src_dir = data_dir / "forward_src"
-        self.forward_gen_dir = data_dir / "forward_gen"
-        self.backward_gen_dir = data_dir / "backward_gen"
-        self.para_dir = data_dir / "paraphrase"
+        scratch_dir = Path(scratch_dir)
+        self.doc_len_dir = scratch_dir / "doc_len"
+        self.forward_src_dir = scratch_dir / "forward_src"
+        self.forward_gen_dir = scratch_dir / "forward_gen"
+        self.backward_gen_dir = scratch_dir / "backward_gen"
+        self.para_dir = scratch_dir / "paraphrase"
 
-        data_dir.mkdir(exist_ok=True)
         self.doc_len_dir.mkdir(exist_ok=True)
         self.forward_src_dir.mkdir(exist_ok=True)
         self.forward_gen_dir.mkdir(exist_ok=True)
@@ -38,6 +38,13 @@ class BackTranslate:
         self.para_dir.mkdir(exist_ok=True)
 
     def __call__(self, contents):
+        """
+        Every time you run this component, you'll get different translated permutations
+        for the same example.
+
+        # TODO: Add function determinism for test cases.
+
+        """
         with NamedTemporaryFile() as file:
             for item in contents:
                 file.write(f"{item}\n".encode())
@@ -98,3 +105,45 @@ class BackTranslate:
                 doc_len_file=f"{self.doc_len_dir}/doc_len_{self.worker_id}_of_{self.replicas}.json",
             )
         )
+
+    def replace_with_paraphrase(
+        self, 
+        ori_text,
+        new_text,
+        use_min_length=10,
+        use_max_length_diff_ratio=0.5
+    ):
+        """
+        Use new_text if the text length satisfies several constraints.
+        """
+        if len(ori_text) < use_min_length or len(new_text) < use_min_length:
+            if random.random() < 0.001:
+                info(
+                    f"Not replacing due to short text: \n\tori: {ori_text}\n\tnew: {new_text}\n"
+                )
+            return False
+    
+        length_diff_ratio = 1.0 * (len(new_text) - len(ori_text)) / len(ori_text)
+        if math.fabs(length_diff_ratio) > use_max_length_diff_ratio:
+            if random.random() < 0.001:
+                info(
+                    f"Not replacing due to too different text length: \n\tori: {ori_text}\n\tnew: {new_text}\n"
+                )
+            return False
+    
+        return True
+
+    def select_reasonable_paraphrases(self, examples, paraphrases):
+        assert len(examples) == len(paraphrases)
+
+        return [
+            (
+                paraphrase
+                if self.replace_with_paraphrase(
+                    example,
+                    paraphrase,
+                )
+                else example
+            )
+            for example, paraphrase in zip(examples, paraphrases)
+        ]

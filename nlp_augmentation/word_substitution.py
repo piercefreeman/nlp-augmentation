@@ -28,17 +28,6 @@ import string
 
 import numpy as np
 import tensorflow as tf
-from absl import flags
-
-
-FLAGS = flags.FLAGS
-
-
-printable = set(string.printable)
-
-
-def filter_unicode(st):
-    return "".join([c for c in st if c in printable])
 
 
 class EfficientRandomGen(object):
@@ -67,7 +56,7 @@ class EfficientRandomGen(object):
         return token
 
 
-class UnifRep(EfficientRandomGen):
+class UniformWordSubstitution(EfficientRandomGen):
     """Uniformly replace word with random words in the vocab."""
 
     def __init__(self, token_prob, vocab):
@@ -77,11 +66,11 @@ class UnifRep(EfficientRandomGen):
         self.reset_token_list()
         self.reset_random_prob()
 
+    def fit(self, examples):
+        pass
+
     def __call__(self, example):
-        example.word_list_a = self.replace_tokens(example.word_list_a)
-        if example.text_b:
-            example.word_list_b = self.replace_tokens(example.word_list_b)
-        return example
+        return self.replace_tokens(example)
 
     def replace_tokens(self, tokens):
         """Replace tokens randomly."""
@@ -108,56 +97,30 @@ class UnifRep(EfficientRandomGen):
         np.random.shuffle(self.token_list)
 
 
-def get_data_stats(examples):
-    """Compute the IDF score for each word. Then compute the TF-IDF score."""
-    word_doc_freq = collections.defaultdict(int)
-    # Compute IDF
-    for i in range(len(examples)):
-        cur_word_dict = {}
-        cur_sent = copy.deepcopy(examples[i].word_list_a)
-        if examples[i].text_b:
-            cur_sent += examples[i].word_list_b
-        for word in cur_sent:
-            cur_word_dict[word] = 1
-        for word in cur_word_dict:
-            word_doc_freq[word] += 1
-    idf = {}
-    for word in word_doc_freq:
-        idf[word] = math.log(len(examples) * 1. / word_doc_freq[word])
-    # Compute TF-IDF
-    tf_idf = {}
-    for i in range(len(examples)):
-        cur_word_dict = {}
-        cur_sent = copy.deepcopy(examples[i].word_list_a)
-        if examples[i].text_b:
-            cur_sent += examples[i].word_list_b
-        for word in cur_sent:
-            if word not in tf_idf:
-                tf_idf[word] = 0
-            tf_idf[word] += 1. / len(cur_sent) * idf[word]
-    return {
-            "idf": idf,
-            "tf_idf": tf_idf,
-    }
-
-
-class TfIdfWordRep(EfficientRandomGen):
+class TfIdfWordSubstitution(EfficientRandomGen):
     """TF-IDF Based Word Replacement."""
 
-    def __init__(self, token_prob, data_stats):
-        super(TfIdfWordRep, self).__init__()
+    def __init__(self, token_prob):
+        super().__init__()
+
         self.token_prob = token_prob
-        self.data_stats = data_stats
-        self.idf = data_stats["idf"]
-        self.tf_idf = data_stats["tf_idf"]
-        data_stats = copy.deepcopy(data_stats)
-        tf_idf_items = data_stats["tf_idf"].items()
+        data_stats = None
+
+    def fit(self, examples):
+        self.data_stats = self.get_data_stats(examples)
+        self.idf = self.data_stats["idf"]
+        self.tf_idf = self.data_stats["tf_idf"]
+
+        tf_idf_items = self.data_stats["tf_idf"].items()
         tf_idf_items = sorted(tf_idf_items, key=lambda item: -item[1])
+
         self.tf_idf_keys = []
         self.tf_idf_values = []
+
         for key, value in tf_idf_items:
             self.tf_idf_keys += [key]
             self.tf_idf_values += [value]
+
         self.normalized_tf_idf = np.array(self.tf_idf_values)
         self.normalized_tf_idf = (self.normalized_tf_idf.max()
                                                             - self.normalized_tf_idf)
@@ -181,36 +144,15 @@ class TfIdfWordRep(EfficientRandomGen):
         return replace_prob
 
     def __call__(self, example):
-        if self.get_random_prob() < 0.001:
-            show_example = True
-        else:
-            show_example = False
-        all_words = copy.deepcopy(example.word_list_a)
-        if example.text_b:
-            all_words += example.word_list_b
+        assert self.data_stats is not None
 
-        if show_example:
-            tf.logging.info("before tf_idf_unif aug: {:s}".format(
-                    filter_unicode(" ".join(all_words))))
+        all_words = example.split()
 
         replace_prob = self.get_replace_prob(all_words)
-        example.word_list_a = self.replace_tokens(
-                example.word_list_a,
-                replace_prob[:len(example.word_list_a)]
-                )
-        if example.text_b:
-            example.word_list_b = self.replace_tokens(
-                    example.word_list_b,
-                    replace_prob[len(example.word_list_a):]
-                    )
-
-        if show_example:
-            all_words = copy.deepcopy(example.word_list_a)
-            if example.text_b:
-                all_words += example.word_list_b
-            tf.logging.info("after tf_idf_unif aug: {:s}".format(
-                    filter_unicode(" ".join(all_words))))
-        return example
+        return  self.replace_tokens(
+            all_words,
+            replace_prob[:len(all_words)],
+        )
 
     def replace_tokens(self, word_list, replace_prob):
         """Replace tokens in a sentence."""
@@ -227,23 +169,42 @@ class TfIdfWordRep(EfficientRandomGen):
         for idx in token_list_idx:
             self.token_list += [self.tf_idf_keys[idx]]
         self.token_ptr = len(self.token_list) - 1
-        tf.logging.info("sampled token list: {:s}".format(
-                filter_unicode(" ".join(self.token_list))))
 
+    def get_data_stats(self, examples):
+        """
+        Compute the IDF score for each word. Then compute the TF-IDF score.
 
-def word_level_augment(examples, aug_ops, vocab, data_stats):
-    """Word level augmentations. Used before augmentation."""
-    if aug_ops:
-        if aug_ops.startswith("unif"):
-            tf.logging.info("\n>>Using augmentation {}".format(aug_ops))
-            token_prob = float(aug_ops.split("-")[1])
-            op = UnifRep(token_prob, vocab)
-            for i in range(len(examples)):
-                examples[i] = op(examples[i])
-        elif aug_ops.startswith("tf_idf"):
-            tf.logging.info("\n>>Using augmentation {}".format(aug_ops))
-            token_prob = float(aug_ops.split("-")[1])
-            op = TfIdfWordRep(token_prob, data_stats)
-            for i in range(len(examples)):
-                examples[i] = op(examples[i])
-    return examples
+        TODO: Replace with sklearn vectorizers
+        """
+        word_doc_freq = collections.defaultdict(int)
+
+        # Compute IDF
+        for example in examples:
+            cur_word_dict = {}
+            cur_sent = example.split()
+
+            for word in cur_sent:
+                cur_word_dict[word] = 1
+            for word in cur_word_dict:
+                word_doc_freq[word] += 1
+
+        idf = {}
+        for word in word_doc_freq:
+            idf[word] = math.log(len(examples) * 1. / word_doc_freq[word])
+
+        # Compute TF-IDF
+        tf_idf = {}
+        for i in examples:
+            cur_word_dict = {}
+            cur_sent = example.split()
+
+            for word in cur_sent:
+                if word not in tf_idf:
+                    tf_idf[word] = 0
+                tf_idf[word] += 1. / len(cur_sent) * idf[word]
+
+        return {
+            "idf": idf,
+            "tf_idf": tf_idf,
+        }
+
