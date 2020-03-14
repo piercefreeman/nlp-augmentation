@@ -24,6 +24,9 @@ requirements = [
 setup_requirements = []
 
 test_requirements = [
+    "flake8>=3.7.9",
+    "flake8-isort>=2.8.0",
+    "isort>=4.3.21",
 ]
 
 setup(

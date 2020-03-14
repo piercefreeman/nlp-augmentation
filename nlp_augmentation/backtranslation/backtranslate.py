@@ -1,15 +1,15 @@
-from subprocess import call
 from pathlib import Path
-from click import secho
+from subprocess import call
 from tempfile import NamedTemporaryFile
+
+from click import secho
 
 from nlp_augmentation.backtranslation.postprocessor import SentToParagraph
 from nlp_augmentation.backtranslation.preprocessor import SplitParagraphs
 
 
-
 class BackTranslate:
-    def __init__(self, replicas=1, worker_id=0, sampling_temp=0.8):
+    def __init__(self, model_dir, replicas=1, worker_id=0, sampling_temp=0.8):
         """
         :param replicas: An argument for parallel preprocessing. For example, when replicas=3,
             we divide the data into three parts, and only process one part
@@ -18,6 +18,7 @@ class BackTranslate:
             details.
 
         """
+        self.model_dir = str(model_dir)
         self.replicas = replicas
         self.worker_id = worker_id
         self.sampling_temp = sampling_temp
@@ -64,11 +65,11 @@ class BackTranslate:
                 "--hparams_set=transformer_big",
                 f"--hparams=sampling_method=random,sampling_temp={self.sampling_temp}",
                 "--decode_hparams=beam_size=1,batch_size=16",
-                "--checkpoint_path=checkpoints/enfr/model.ckpt-500000",
+                f"--checkpoint_path={self.model_dir}/enfr/model.ckpt-500000",
                 "--output_dir=/tmp/t2t",
                 f"--decode_from_file={self.forward_src_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
                 f"--decode_to_file={self.forward_gen_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
-                "--data_dir=checkpoints"
+                f"--data_dir={self.model_dir}"
             ]
         )
 
@@ -81,11 +82,11 @@ class BackTranslate:
                 "--hparams_set=transformer_big",
                 f"--hparams=sampling_method=random,sampling_temp={self.sampling_temp}",
                 "--decode_hparams=beam_size=1,batch_size=16,alpha=0",
-                "--checkpoint_path=checkpoints/fren/model.ckpt-500000",
+                f"--checkpoint_path={self.model_dir}/fren/model.ckpt-500000",
                 "--output_dir=/tmp/t2t",
                 f"--decode_from_file={self.forward_gen_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
                 f"--decode_to_file={self.backward_gen_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
-                "--data_dir=checkpoints"
+                f"--data_dir={self.model_dir}"
             ]
         )
 

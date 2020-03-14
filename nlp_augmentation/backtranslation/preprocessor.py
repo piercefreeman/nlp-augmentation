@@ -17,15 +17,13 @@ Split the paragraph into sentences for back translation.
 
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import json
 import os
 import tempfile
-import nltk
 
+import nltk
 import tensorflow as tf
 
 
@@ -140,4 +138,3 @@ class SplitParagraphs:
                 ouf.write(st + "\n")
         with tf.gfile.Open(doc_len_file, "w") as ouf:
             json.dump(doc_len, ouf)
-

@@ -35,3 +35,19 @@ Originally from [Google Research](https://github.com/google-research/uda).
     ```
     uda download
     ```
+
+    This download places the models within `~/.nlp_augmentation` to cache them across multiple virtualenvs.
+
+## Linting / Testing
+
+Ensure files are linted according to flake8 and isort conventions:
+
+```
+flake8
+```
+
+To easily fix the isort errors, run:
+
+```
+isort -rc .
+```

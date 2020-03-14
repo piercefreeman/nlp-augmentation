@@ -1,10 +1,13 @@
-from click import group, option
-from nlp_augmentation.backtranslation.backtranslate import BackTranslate
-from zipfile import ZipFile
-from requests import get
-from tqdm import tqdm
 from pathlib import Path
 from tempfile import TemporaryFile
+from zipfile import ZipFile
+
+from click import group, option
+from requests import get
+from tqdm import tqdm
+
+from nlp_augmentation.backtranslation.backtranslate import BackTranslate
+
 
 ## run back translation
 ## sent level augmentation, which calls word translation
@@ -20,11 +23,14 @@ def uda():
 
 
 @uda.command()
-def main():
+def augment():
     # Every time you run this component, you'll get different permutations for the same example
-    backtranslation = BackTranslate()
+    backtranslation = BackTranslate(
+        model_dir=Path("~/.nlp_augmentation/checkpoints").expanduser()
+    )
     paraphrased_examples = backtranslation(EXAMPLES)
-    print(paraphrased_examples)
+
+    aa
 
 
 @uda.command()
@@ -38,6 +44,11 @@ def download():
     block_size = 1024
     progress_bar = tqdm(total=total_size, unit="iB", unit_scale=True)
 
+    augmentation_path = Path("~/.nlp_augmentation").expanduser()
+    checkpoints_path = augmentation_path / "checkpoints"
+
+    # Download zip file to temporary path so if the process is inturrupted, it will
+    # be automatically garbage collected
     with TemporaryFile() as file:
         for data in request.iter_content(block_size):
             progress_bar.update(len(data))
@@ -46,8 +57,15 @@ def download():
         progress_bar.close()
         file.seek(0)
 
-        ZipFile(file).extractall(Path("~/.nlp_augmentation"))
+        ZipFile(file).extractall(augmentation_path)
 
+    # Postprocessing to change a few files into the required formats
+    (
+        Path(checkpoints_path / "vocab.translate_enfr_wmt32k.32768.subwords")
+        .rename(
+            Path(checkpoints_path / "vocab.enfr.large.32768")
+        )
+    )
 
 """ 
 def proc_and_save_unsup_data(
