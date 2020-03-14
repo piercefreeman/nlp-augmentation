@@ -14,6 +14,9 @@ class TfIdfWordSubstitution(AugmentationBase, WordSubstitutionBase):
         data_stats = None
 
     def fit(self, examples):
+        if len(examples) < 2:
+            raise ValueError("You must fit on at least two examples to calculate corpus statistics.")
+
         self.data_stats = self.get_data_stats(examples)
         self.idf = self.data_stats["idf"]
         self.tf_idf = self.data_stats["tf_idf"]
