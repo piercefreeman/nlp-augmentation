@@ -1,9 +1,0 @@
-README.md
-setup.py
-nlp_augmentation.egg-info/PKG-INFO
-nlp_augmentation.egg-info/SOURCES.txt
-nlp_augmentation.egg-info/dependency_links.txt
-nlp_augmentation.egg-info/entry_points.txt
-nlp_augmentation.egg-info/not-zip-safe
-nlp_augmentation.egg-info/requires.txt
-nlp_augmentation.egg-info/top_level.txt
