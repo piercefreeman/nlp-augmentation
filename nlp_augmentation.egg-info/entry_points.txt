@@ -1,0 +1,3 @@
+[console_scripts]
+uda = nlp_augmentation.uda:uda
+
