@@ -1,15 +1,17 @@
 from pathlib import Path
 from subprocess import call
 from tempfile import NamedTemporaryFile
+from math import fabs
 
 from click import secho
 
 from nlp_augmentation.backtranslation.postprocessor import SentToParagraph
 from nlp_augmentation.backtranslation.preprocessor import SplitParagraphs
+from nlp_augmentation.base import AugmentationBase
 from logging import info
 
 
-class BackTranslate:
+class BackTranslate(AugmentationBase):
     def __init__(self, model_dir, scratch_dir, replicas=1, worker_id=0, sampling_temp=0.8):
         """
         :param replicas: An argument for parallel preprocessing. For example, when replicas=3,
@@ -37,7 +39,7 @@ class BackTranslate:
         self.backward_gen_dir.mkdir(exist_ok=True)
         self.para_dir.mkdir(exist_ok=True)
 
-    def __call__(self, contents):
+    def __call__(self, examples, validate_reasonable=True):
         """
         Every time you run this component, you'll get different translated permutations
         for the same example.
@@ -46,7 +48,7 @@ class BackTranslate:
 
         """
         with NamedTemporaryFile() as file:
-            for item in contents:
+            for item in examples:
                 file.write(f"{item}\n".encode())
             file.seek(0)
 
@@ -54,14 +56,13 @@ class BackTranslate:
                 replicas=self.replicas,
                 worker_id=self.worker_id,
             )
-            print(split_paragraphs)
             split_paragraphs(
                 input_file=file.name,
                 output_file=self.forward_src_dir / f"file_{self.worker_id}_of_{self.replicas}.txt",
                 doc_len_file=self.doc_len_dir / f"doc_len_{self.worker_id}_of_{self.replicas}.json",
             )
 
-        # TODO: Convet into native library calls
+        # TODO: Convert into native library calls
         # https://github.com/tensorflow/tensor2tensor/blob/c1165f67966b86d9fa304ef8d1b745f70a7b9f75/tensor2tensor/bin/t2t_decoder.py
         secho("*** forward translation ***", fg="green")
         call(
@@ -99,12 +100,16 @@ class BackTranslate:
 
         secho("*** transform sentences back into paragraphs ***", fg="green")
         sent_to_paragraph = SentToParagraph()
-        return list(
+        paraphrases = list(
             sent_to_paragraph(
                 input_file=f"{self.backward_gen_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
                 doc_len_file=f"{self.doc_len_dir}/doc_len_{self.worker_id}_of_{self.replicas}.json",
             )
         )
+
+        if validate_reasonable:
+            return self.select_reasonable_paraphrases(examples, paraphrases)
+        return paraphrases
 
     def replace_with_paraphrase(
         self, 
@@ -117,23 +122,21 @@ class BackTranslate:
         Use new_text if the text length satisfies several constraints.
         """
         if len(ori_text) < use_min_length or len(new_text) < use_min_length:
-            if random.random() < 0.001:
-                info(
-                    f"Not replacing due to short text: \n\tori: {ori_text}\n\tnew: {new_text}\n"
-                )
             return False
     
         length_diff_ratio = 1.0 * (len(new_text) - len(ori_text)) / len(ori_text)
-        if math.fabs(length_diff_ratio) > use_max_length_diff_ratio:
-            if random.random() < 0.001:
-                info(
-                    f"Not replacing due to too different text length: \n\tori: {ori_text}\n\tnew: {new_text}\n"
-                )
+        if fabs(length_diff_ratio) > use_max_length_diff_ratio:
             return False
     
         return True
 
     def select_reasonable_paraphrases(self, examples, paraphrases):
+        """
+        Some paraphrases aren't resonable since they diverge so much from the original
+        text passage in terms of length or other composition.  Limit ourselves to just
+        using the ones that are valid.
+
+        """
         assert len(examples) == len(paraphrases)
 
         return [

@@ -16,9 +16,6 @@
 Split the paragraph into sentences for back translation.
 
 """
-
-from __future__ import absolute_import, division, print_function
-
 import json
 import os
 import tempfile
@@ -67,7 +64,6 @@ class SplitParagraphs:
             end = data_per_worker * (worker_id + 1) + remainder
         if worker_id == self.replicas - 1:
             assert end == len(contents)
-        tf.logging.info("processing data from {:d} to {:d}".format(start, end))
         contents = contents[start: end]
         return contents
 
@@ -84,11 +80,8 @@ class SplitParagraphs:
 
         sent_tokenizer = nltk.tokenize.sent_tokenize
 
-        tf.logging.info("loading input data")
         with tf.gfile.Open(input_file) as inf:
             contents = inf.readlines()
-        tf.logging.info("finished loading input data")
-        print("Contents", contents)
         assert len(contents) >= self.replicas
 
         contents = self.divide_data_for_worker(contents)
@@ -97,15 +90,12 @@ class SplitParagraphs:
         doc_len = []
         # Split paragraphs into sentences since the model is trained on sentence-level
         # translations.
-        tf.logging.info("splitting sentence")
         for i in range(len(contents)):
             contents[i] = contents[i].strip()
             if isinstance(contents[i], bytes):
                 contents[i] = contents[i].decode("utf-8")
             sent_list = sent_tokenizer(contents[i])
             has_long = False
-            if i % 100 == 0:
-                tf.logging.info("splitting sentence {:d}".format(i))
             for split_punc in [".", ";", ",", " ", ""]:
                 if split_punc == " " or not split_punc:
                     offset = 100
@@ -130,8 +120,6 @@ class SplitParagraphs:
             #  nltk.sent_tokenize in python2 will omit some unicode characters
             for st in sent_list:
                 new_contents += [st]
-
-        tf.logging.info("finished spliting paragraphs")
 
         with tf.gfile.Open(output_file, "w") as ouf:
             for st in new_contents:

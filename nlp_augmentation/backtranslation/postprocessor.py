@@ -16,12 +16,9 @@
 Compose paraphrased sentences back to paragraphs.
 
 """
-from __future__ import absolute_import, division, print_function
-
 import json
 
 import tensorflow as tf
-from absl import app, flags
 
 
 class SentToParagraph:

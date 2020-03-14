@@ -4,25 +4,6 @@ from typing import List
 
 
 class WordSubstitutionBase(ABC):
-    def fit(self, examples: List[str]):
-        """
-        Handle any training on the full corpus that's necessary to initialize this word
-        substitution model.  No-Op unless over-ridden by subclasses.
-
-        :param example: list containing all corpus examples.
-
-        """
-        pass
-
-    @abstractmethod
-    def __call__(self, example: str):
-        """
-        Apply the word substitution on one example.
-
-        :param example: str containing the desired text to augment.
-        """
-        pass
-
     def reset_random_prob(self):
         """Generate many random numbers at the same time and cache them."""
         cache_len = 100000

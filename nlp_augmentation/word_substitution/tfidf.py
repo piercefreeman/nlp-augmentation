@@ -1,9 +1,10 @@
 from nlp_augmentation.word_substitution.base import WordSubstitutionBase
+from nlp_augmentation.base import AugmentationBase
 from collections import defaultdict
 import numpy as np
 from math import log
 
-class TfIdfWordSubstitution(WordSubstitutionBase):
+class TfIdfWordSubstitution(AugmentationBase, WordSubstitutionBase):
     """TF-IDF Based Word Replacement."""
 
     def __init__(self, token_prob):
@@ -47,16 +48,20 @@ class TfIdfWordSubstitution(WordSubstitutionBase):
                                         self.token_prob * len(all_words))
         return replace_prob
 
-    def __call__(self, example):
+    def __call__(self, examples):
         assert self.data_stats is not None
+        return [self.process_example(example) for example in examples]
 
+    def process_example(self, example):
         all_words = example.split()
 
         replace_prob = self.get_replace_prob(all_words)
-        return  self.replace_tokens(
+        replaced_words = self.replace_tokens(
             all_words,
             replace_prob[:len(all_words)],
         )
+
+        return " ".join(replaced_words)
 
     def replace_tokens(self, word_list, replace_prob):
         """Replace tokens in a sentence."""

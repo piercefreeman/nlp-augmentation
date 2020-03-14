@@ -1,6 +1,9 @@
 from nlp_augmentation.word_substitution.base import WordSubstitutionBase
+from nlp_augmentation.base import AugmentationBase
+import numpy as np
 
-class UniformWordSubstitution(WordSubstitutionBase):
+
+class UniformWordSubstitution(AugmentationBase, WordSubstitutionBase):
     """Uniformly replace word with random words in the vocab."""
 
     def __init__(self, token_prob, vocab):
@@ -13,8 +16,11 @@ class UniformWordSubstitution(WordSubstitutionBase):
     def fit(self, examples):
         pass
 
-    def __call__(self, example):
-        return self.replace_tokens(example)
+    def __call__(self, examples):
+        return [
+            " ".join(self.replace_tokens(example.split()))
+            for example in examples
+        ]
 
     def replace_tokens(self, tokens):
         """Replace tokens randomly."""
