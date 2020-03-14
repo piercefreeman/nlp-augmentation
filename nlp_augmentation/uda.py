@@ -7,7 +7,7 @@ from requests import get
 from tqdm import tqdm
 
 from nlp_augmentation.backtranslation.backtranslate import BackTranslate
-from nlp_augmentation.word_substitution import TfIdfWordSubstitution
+from nlp_augmentation.word_substitution.tfidf import TfIdfWordSubstitution
 
 
 ## run back translation
