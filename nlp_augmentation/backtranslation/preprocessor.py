@@ -108,7 +108,7 @@ class SplitParagraphs:
                         new_sent_list += [sent]
                     else:
                         has_long = True
-                        sent_split = split_sent_by_punc(sent, split_punc, offset)
+                        sent_split = self.split_sent_by_punc(sent, split_punc, offset)
                         new_sent_list += sent_split
                 sent_list = new_sent_list
                 if not has_long:
