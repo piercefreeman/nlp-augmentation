@@ -22,7 +22,8 @@ def uda():
 @option("--input-path", type=ClickPath(exists=True, file_okay=True), required=True)
 @option("--augmentation-count", type=int, required=True)
 @option("--output-path", type=ClickPath(), required=True)
-def augment(input_path, augmentation_count, output_path):
+@option("--gpu-count", type=int, required=True, default=0)
+def augment(input_path, augmentation_count, output_path, gpu_count):
     """
     CLI utility to augment the text contents of an input file.  Expects a `.jsonl` file with
     each line containing a `text` key with the text that should be supplemented.
@@ -53,6 +54,7 @@ def augment(input_path, augmentation_count, output_path):
     backtranslation = BackTranslate(
         model_dir=Path("~/.nlp_augmentation/checkpoints").expanduser(),
         scratch_dir=scratch_path.name,
+        gpu_count=gpu_count,
     )
 
     word_replacement = TfIdfWordSubstitution(0.7)
