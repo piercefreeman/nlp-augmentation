@@ -12,10 +12,16 @@ This code has been tested with Python 3.7.
     python3 -m venv env nlp-transformations
     ```
 
-1. Install the package requirements.
+1. Install the package requirements.  If you are using a CPU, run:
 
     ```
-    pip install -e .
+    pip install -e .[cpu]
+    ```
+
+    If you'd like it optimized for your GPU, use:
+
+    ```
+    pip install -e .[gpu]
     ```
 
 1. Install `nltk` dependencies:
@@ -46,7 +52,7 @@ Originally from [Google Research](https://github.com/google-research/uda).
     ```
 
     ```
-    uda augment --input-path ./example.jsonl --output-path ./example-supplemented.jsonl --augmentation-count 5
+    uda augment --input-path ./example.jsonl --output-path ./example-supplemented.jsonl --augmentation-count 5 [--gpu-count 1]
      ```
 
 ## Linting / Testing

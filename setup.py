@@ -12,8 +12,7 @@ with open("README.md") as readme_file:
 requirements = [
     # NOTE: @pierce mar-14-2020: we temporarily pin the versions of dependencies to the
     # same versions that were used in the original Google paper.  This allows for cross-
-    # compatibility of their weight files.
-    "tensorflow==1.13.1",
+    # compatibility of their weight files.    
     "numpy==1.16.2",
     "tensor2tensor==1.8.0",
     "nltk>=3.4.5",
@@ -62,6 +61,12 @@ setup(
     tests_require=test_requirements,
     extras_require={
         "test": test_requirements,
+        "cpu": [
+            "tensorflow==1.13.1",
+        ],
+        "gpu": [
+            "tensorflow-gpu==1.13.1",
+        ]
     },
     url="https://github.com/piercefreeman/nlp_augmentation",
     version="0.1.0",
