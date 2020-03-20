@@ -2,7 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryFile, TemporaryDirectory
 from zipfile import ZipFile
 
-from click import group, option, Path as ClickPath
+from click import group, option, Path as ClickPath, Choice
 from requests import get
 from tqdm import tqdm
 from json import loads as json_loads, dumps as json_dumps
@@ -22,8 +22,19 @@ def uda():
 @option("--input-path", type=ClickPath(exists=True, file_okay=True), required=True)
 @option("--augmentation-count", type=int, required=True)
 @option("--output-path", type=ClickPath(), required=True)
-@option("--gpu-count", type=int, required=True, default=0)
-def augment(input_path, augmentation_count, output_path, gpu_count):
+@option(
+    "--method",
+    type=Choice([
+        "cpu",
+        "gpu",
+        "tpu",
+    ]),
+    required=True,
+    default="cpu",
+)
+@option("--tpu_cloud_name", type=str, default=None)
+@option("--tpu_storage_bucket", type=str, default=None)
+def augment(input_path, augmentation_count, output_path, method, tpu_cloud_name, tpu_storage_bucket):
     """
     CLI utility to augment the text contents of an input file.  Expects a `.jsonl` file with
     each line containing a `text` key with the text that should be supplemented.
@@ -51,10 +62,23 @@ def augment(input_path, augmentation_count, output_path, gpu_count):
     ]
 
     scratch_path = TemporaryDirectory()
+
+    backtranslation_configuration_dir = {
+        "gpu": {
+            "use_gpu": True,
+            "gpu_count": 1,
+        },
+        "tpu": {
+            "use_tpu": True,
+            "tpu_cloud_name": tpu_cloud_name,
+            "tpu_storage_bucket": tpu_storage_bucket,
+        }
+    }
+
     backtranslation = BackTranslate(
         model_dir=Path("~/.nlp_augmentation/checkpoints").expanduser(),
         scratch_dir=scratch_path.name,
-        gpu_count=gpu_count,
+        **backtranslation_configuration_dir.get(method, {})
     )
 
     word_replacement = TfIdfWordSubstitution(0.7)
@@ -113,14 +137,6 @@ def download():
         file.seek(0)
 
         ZipFile(file).extractall(augmentation_path)
-
-    # Postprocessing to change a few files into the required formats
-    (
-        Path(checkpoints_path / "vocab.translate_enfr_wmt32k.32768.subwords")
-        .rename(
-            Path(checkpoints_path / "vocab.enfr.large.32768")
-        )
-    )
 
 
 def perform_augmentation(augmentor_name, augmentor, examples, augmentation_per_example):

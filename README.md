@@ -52,7 +52,7 @@ Originally from [Google Research](https://github.com/google-research/uda).
     ```
 
     ```
-    uda augment --input-path ./example.jsonl --output-path ./example-supplemented.jsonl --augmentation-count 5 [--gpu-count 1]
+    uda augment --input-path ./example.jsonl --output-path ./example-supplemented.jsonl --augmentation-count 5 [--gpu-count 1] [--use-tpu True --cloud_tpu_name XXX]
      ```
 
 ## Linting / Testing

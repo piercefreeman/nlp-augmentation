@@ -14,7 +14,7 @@ requirements = [
     # same versions that were used in the original Google paper.  This allows for cross-
     # compatibility of their weight files.    
     "numpy==1.16.2",
-    "tensor2tensor==1.8.0",
+    "tensor2tensor>=1.15.4",
     "nltk>=3.4.5",
     "requests>=2.23.0",
     "tqdm>=4.43.0",
@@ -62,10 +62,11 @@ setup(
     extras_require={
         "test": test_requirements,
         "cpu": [
-            "tensorflow==1.13.1",
+            # Mirror versions required by tensor2tensor
+            "tensorflow>=1.15.0,<2.0",
         ],
         "gpu": [
-            "tensorflow-gpu==1.13.1",
+            "tensorflow-gpu>=1.15.0,<2.0",
         ]
     },
     url="https://github.com/piercefreeman/nlp_augmentation",
