@@ -162,21 +162,27 @@ class BackTranslate(AugmentationBase):
 
         hparams_set = "transformer_big_tpu" if self.use_tpu else "transformer_big"
 
-        call(
-            [
-                "t2t-decoder",
-                f"--problem={problem}",
-                "--model=transformer",
-                f"--hparams_set={hparams_set}",
-                f"--hparams=sampling_method=random,sampling_temp={self.sampling_temp}",
-                f"--decode_hparams={decode_hparams}",
-                f"--checkpoint_path={_model_dir}/{checkpoint_path}",
-                f"--output_dir={_output_dir}",
-                f"--decode_from_file={_decode_from_file}",
-                f"--decode_to_file={_decode_to_file}",
-                f"--data_dir={_model_dir}",
-            ]
-        )
+        call_parameters = [
+            "t2t-decoder",
+            f"--problem={problem}",
+            "--model=transformer",
+            f"--hparams_set={hparams_set}",
+            f"--hparams=sampling_method=random,sampling_temp={self.sampling_temp}",
+            f"--decode_hparams={decode_hparams}",
+            f"--checkpoint_path={_model_dir}/{checkpoint_path}",
+            f"--output_dir={_output_dir}",
+            f"--decode_from_file={_decode_from_file}",
+            f"--decode_to_file={_decode_to_file}",
+            f"--data_dir={_model_dir}",
+        ]
+
+        if self.use_gpu:
+            call_parameters.append(f"--gpu-count={self.gpu_count}")
+        elif self.use_tpu:
+            call_parameters.append(f"--use-tpu=True")
+            call_parameters.append(f"--cloud_tpu_name={self.tpu_storage_bucket}")
+
+        call(call_parameters)
 
         if self.use_tpu:
             self.sync_to_local(_decode_to_file, decode_to_file)
@@ -197,6 +203,8 @@ class BackTranslate(AugmentationBase):
             local_file,
             remote_path,
         ]
+
+        print("will sync remote", commands)
 
         call(commands)
 
