@@ -150,10 +150,10 @@ class BackTranslate(AugmentationBase):
 
         """
         if self.use_tpu:        
-            _model_dir = sync_to_remote(model_dir, recursive=True)
-            _decode_from_file = sync_to_remote(decode_from_file)
-            _decode_to_file = f"gs://{self.tpu_storage_bucket}/uuid4()"
-            _output_dir = f"gs://{self.tpu_storage_bucket}/uuid4()"
+            _model_dir = self.sync_to_remote(model_dir, recursive=True)
+            _decode_from_file = self.sync_to_remote(decode_from_file)
+            _decode_to_file = self.randomly_generate_gcp_path()
+            _output_dir = self.randomly_generate_gcp_path()
         else:
             _model_dir = model_dir
             _decode_from_file = decode_from_file
@@ -183,7 +183,7 @@ class BackTranslate(AugmentationBase):
             self.sync_to_local(_output_dir, output_dir, recursive=True)
 
     def sync_to_remote(self, local_file, recursive=False):
-        remote_path = f"gs://{self.tpu_storage_bucket}/uuid4()"
+        remote_path = self.randomly_generate_gcp_path()
 
         commands = [
             "gsutil",
@@ -191,7 +191,7 @@ class BackTranslate(AugmentationBase):
         ]
 
         if recursive:
-            commands.append("--recursive")
+            commands.append("-r")
 
         commands += [
             local_file,
@@ -209,7 +209,7 @@ class BackTranslate(AugmentationBase):
         ]
 
         if recursive:
-            commands.append("--recursive")
+            commands.append("-r")
 
         commands += [
             remote_file,
@@ -218,7 +218,9 @@ class BackTranslate(AugmentationBase):
 
         call(commands)
 
-        return remote_path
+    def randomly_generate_gcp_path(self):
+        remote_path = uuid4()
+        return f"gs://{self.tpu_storage_bucket}/{remote_path}"
 
     def replace_with_paraphrase(
         self, 
