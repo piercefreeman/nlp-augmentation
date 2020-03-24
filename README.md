@@ -1,6 +1,6 @@
 # NLP Augmentation
 
-The technique of data augmentation has shown wide success in computer vision, and early application to natural language processing as well.  This library houses plug-and-play data augmentation techniques that are intended.
+The technique of data augmentation has shown wide success in computer vision and early application to natural language processing as well.  This library houses various modules for the latest NLP data augmentation techniques.  It's intended to be as easy as possible to pass your own dataset and get back high-quality datapoints to augment your original data for use in semi-supervised learning.
 
 ## Getting Started
 
@@ -12,16 +12,10 @@ This code has been tested with Python 3.7.
     python3 -m venv env nlp-transformations
     ```
 
-1. Install the package requirements.  If you are using a CPU, run:
+1. Install the package requirements.  Run:
 
     ```
-    pip install -e .[cpu]
-    ```
-
-    If you'd like it optimized for your GPU, use:
-
-    ```
-    pip install -e .[gpu]
+    pip install -e .
     ```
 
 1. Install `nltk` dependencies:
@@ -30,19 +24,9 @@ This code has been tested with Python 3.7.
     python -m nltk.downloader punkt
     ```
 
-Had to rename subwords vocab file in `/checkpoints` to `vocab.enfr.large.32768`
-
 ## UDA
 
 Originally from [Google Research](https://github.com/google-research/uda).
-
-1. Install the pre-trained translation models that allow UDA to forward-translate text passages and back-translate them into the original language:
-
-    ```
-    uda download
-    ```
-
-    This download places the models within `~/.nlp_augmentation` to cache them across multiple virtualenvs.
 
 1. Either import the uda augmentation classes manually into a separate python project, or leverage the CLI to supplement a `.jsonl` file that's on disk.  Format each line with a datapoint that includes a `text` key with the text that you'd like to translate.
 
@@ -52,7 +36,7 @@ Originally from [Google Research](https://github.com/google-research/uda).
     ```
 
     ```
-    uda augment --input-path ./example.jsonl --output-path ./example-supplemented.jsonl --augmentation-count 5 [--gpu-count 1] [--use-tpu True --cloud_tpu_name XXX]
+    uda augment --input-path ./example.jsonl --output-path ./example-supplemented.jsonl --augmentation-count 5 [--method gpu --gpu-count 1] [--workers 2]
      ```
 
 ## Linting / Testing

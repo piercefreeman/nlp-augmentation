@@ -1,47 +1,41 @@
-# coding=utf-8
-# Copyright 2019 The Google UDA Team Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """
 Compose paraphrased sentences back to paragraphs.
 
 """
 import json
 
-import tensorflow as tf
+from typing import Iterable, Tuple, List
+from nlp_augmentation.data_models import AugmentedSentenceDatapoint, AugmentedDatapoint
+from itertools import groupby
 
 
 class SentToParagraph:
-    def __call__(self, input_file, doc_len_file):
+    def __call__(self, sentences: Iterable[AugmentedSentenceDatapoint]) -> Iterable[List[AugmentedDatapoint]]:
         """
-        :param input_file: back translated file of sentences.
-        :param output_file: paraphrased sentences.
-        :param doc_len_file: The file that records the length information.
+        :sentences: Sentences that have been augmented by the backtranslation pipeline
 
         """
-        input_file = str(input_file)
-        doc_len_file = str(doc_len_file)
+        sentences = sorted(
+            sentences,
+            key=lambda x: (
+                x.datapoint_identifier,
+                x.augmented_index,
+                x.sentence_index,
+            )
+        )
 
-        with tf.gfile.Open(input_file) as inf:
-            sentences = inf.readlines()
-        with tf.gfile.Open(doc_len_file) as inf:
-            doc_len_list = json.load(inf)
-
-        sentence_index = 0
-
-        for i, sent_num in enumerate(doc_len_list):
-            paragraph = ""
-            for _ in range(sent_num):
-                paragraph += sentences[sentence_index].strip() + " "
-                sentence_index += 1
-            yield paragraph.strip()
+        for datapoint_identifier, datapoint_group in groupby(
+            sentences,
+            lambda x: x.datapoint_identifier
+        ):
+            yield [
+                AugmentedDatapoint(
+                    identifier=datapoint_identifier,
+                    augmented_index=translation_index,
+                    text=" ".join([translation.text.strip() for translation in translation_group])
+                )
+                for translation_index, translation_group in groupby(
+                    datapoint_group,
+                    lambda x: x.augmented_index
+                )
+            ]

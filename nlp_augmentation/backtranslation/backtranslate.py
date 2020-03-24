@@ -10,21 +10,24 @@ from nlp_augmentation.backtranslation.preprocessor import SplitParagraphs
 from nlp_augmentation.base import AugmentationBase
 from logging import info
 from uuid import uuid4
+from multiprocessing import Queue, get_context
+from itertools import groupby
+from nlp_augmentation.data_models import SentenceDatapoint, Datapoint, AugmentedSentenceDatapoint, AugmentedDatapoint
+from typing import Iterable, List
+import torch
+from tqdm import tqdm
+from nlp_augmentation.backtranslation.worker import BackTranslateWorker
 
 
 class BackTranslate(AugmentationBase):
     def __init__(
         self,
-        model_dir,
-        scratch_dir,
-        replicas=1,
-        worker_id=0,
-        sampling_temp=0.8,
+        augmentations,
+        forward_model_name="transformer.wmt19.en-de.single_model",
+        backward_model_name="transformer.wmt19.de-en.single_model",
+        workers=1,
         use_gpu=False,
-        gpu_count=0,
-        use_tpu=False,
-        tpu_cloud_name=None,
-        tpu_storage_bucket=None
+        gpu_count=1,
     ):
         """
         :param replicas: An argument for parallel preprocessing. For example, when replicas=3,
@@ -32,203 +35,121 @@ class BackTranslate(AugmentationBase):
             according to the worker_id.
         :param sampling_temp: The sampling temperature for translation. See README.md for more
             details.
-        :param gpu: quantity of gpus to use
+        :param gpu_count: quantity of gpus to use
 
         """
-        self.model_dir = str(model_dir)
-        self.replicas = replicas
-        self.worker_id = worker_id
-        self.sampling_temp = sampling_temp
+        super().__init__(augmentations=augmentations)
+
+        # TODO: remove model_dir
+        #torch.hub.set_dir(str(model_dir))
+
+        self.workers = workers
         self.use_gpu = use_gpu
         self.gpu_count = gpu_count
-        self.use_tpu = use_tpu
-        self.tpu_cloud_name = tpu_cloud_name
-        self.tpu_storage_bucket = tpu_storage_bucket
 
-        scratch_dir = Path(scratch_dir)
-        self.doc_len_dir = scratch_dir / "doc_len"
-        self.forward_src_dir = scratch_dir / "forward_src"
-        self.forward_gen_dir = scratch_dir / "forward_gen"
-        self.backward_gen_dir = scratch_dir / "backward_gen"
-        self.para_dir = scratch_dir / "paraphrase"
+        self.forward_model_name = forward_model_name
+        self.backward_model_name = backward_model_name
 
-        self.doc_len_dir.mkdir(exist_ok=True)
-        self.forward_src_dir.mkdir(exist_ok=True)
-        self.forward_gen_dir.mkdir(exist_ok=True)
-        self.backward_gen_dir.mkdir(exist_ok=True)
-        self.para_dir.mkdir(exist_ok=True)
-
-    def __call__(self, examples, validate_reasonable=True):
+    def __call__(
+        self,
+        datapoints: Iterable[str],
+        batch_size=1024,
+        validate_reasonable=True
+    ) -> Iterable[List[Datapoint]]:
         """
         Every time you run this component, you'll get different translated permutations
         for the same example.
 
-        # TODO: Add function determinism for test cases.
-
         """
-        with NamedTemporaryFile() as file:
-            for item in examples:
-                file.write(f"{item}\n".encode())
-            file.seek(0)
+        datapoints = list(datapoints)
 
-            split_paragraphs = SplitParagraphs(
-                replicas=self.replicas,
-                worker_id=self.worker_id,
+        secho("*** splitting paragraphs into sentences ***", fg="green")
+        split_paragraphs = SplitParagraphs()
+        sentences = list(tqdm(split_paragraphs(paragraphs=datapoints)))
+
+        # Pre-download the models locally before we split into workers so we don't have an
+        # intra-worker race condition to download the files
+        secho("*** checking for forward pass weight files ***", fg="green")
+        torch.hub.load("pytorch/fairseq", self.forward_model_name)
+
+        secho("*** checking for backward pass weight files ***", fg="green")
+        torch.hub.load("pytorch/fairseq", self.backward_model_name)
+
+        secho(f"*** translating {len(sentences)} sentences ***", fg="green")
+
+        ctx = get_context("spawn")
+        input_queue = ctx.Queue()
+        output_queue = ctx.Queue()
+
+        # Fill the queue with the inference tasks that we want to complete before launching the workers
+        # to consume from this queue
+        for batch in self.chunk_list(sentences, batch_size):
+            input_queue.put(batch)
+
+        workers = [
+            BackTranslateWorker(
+                input_queue=input_queue,
+                output_queue=output_queue,
+                forward_model_name=self.forward_model_name,
+                backward_model_name=self.backward_model_name,
+                gpu_id=worker % self.gpu_count if self.use_gpu else None,
+                samples=self.augmentations,
             )
-            split_paragraphs(
-                input_file=file.name,
-                output_file=self.forward_src_dir / f"file_{self.worker_id}_of_{self.replicas}.txt",
-                doc_len_file=self.doc_len_dir / f"doc_len_{self.worker_id}_of_{self.replicas}.json",
-            )
+            for worker in range(self.workers)
+        ]
 
-        # # DATA_DIR and OUT_DIR should be GCS buckets to train on GPU
-        # Copy local data to google cloud by using CLI commands for now
-        decoder_arguments = []
+        for worker in workers:
+            worker.start()
 
-        if self.use_gpu:
-            decoder_arguments = [
-                f"--worker_gpu={self.gpu_count}",
-            ]
-        elif self.use_tpu:
-            decoder_arguments = [
-                "--use_tpu=True",
-                f"--cloud_tpu_name={self.tpu_storage_bucket}"
-            ]
+        # (datapoint_identifier, translation_index, sentence_index, translation)
+        results = []
 
-        # TODO: Convert into native library calls
-        # https://github.com/tensorflow/tensor2tensor/blob/c1165f67966b86d9fa304ef8d1b745f70a7b9f75/tensor2tensor/bin/t2t_decoder.py
-        secho("*** forward translation ***", fg="green")
-        self.run_decoder(
-            problem="translate_enfr_wmt32k",
-            decode_hparams=f"beam_size=1,batch_size=16",
-            model_dir=self.model_dir,
-            output_dir="/tmp/t2t",
-            decode_from_file=f"{self.forward_src_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
-            decode_to_file=f"{self.forward_gen_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
-            checkpoint_path="enfr/model.ckpt-500000",
-        )
+        finished_processes = 0
 
-        secho("*** backward translation ***", fg="green")
-        self.run_decoder(
-            problem="translate_enfr_wmt32k_rev",
-            decode_hparams=f"beam_size=1,batch_size=16,alpha=0",
-            model_dir=self.model_dir,
-            output_dir="/tmp/t2t",
-            decode_from_file=f"{self.forward_gen_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
-            decode_to_file=f"{self.backward_gen_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
-            checkpoint_path="fren/model.ckpt-500000",
-        )
+        # Batches are all returned at one time, so disable smoothing so we can see the
+        # average amount of datapoints computed per second interval
+        with tqdm(total=len(sentences), smoothing=0) as progress_bar:
+            while True:
+                if finished_processes == len(workers):
+                    break
+
+                datapoint, translations = output_queue.get()
+
+                # Exit condition for our worker
+                if datapoint is None:
+                    finished_processes += 1
+                    continue
+
+                results.extend(
+                    AugmentedSentenceDatapoint(
+                        datapoint_identifier=datapoint.datapoint_identifier,
+                        sentence_index=datapoint.sentence_index,
+                        augmented_index=translation_index,
+                        text=translation
+                    )
+                    for translation_index, translation in enumerate(translations)
+                )
+                progress_bar.update(1)
+
+        print("results", len(results))
+
+        for worker in workers:
+            worker.join()
 
         secho("*** transform sentences back into paragraphs ***", fg="green")
         sent_to_paragraph = SentToParagraph()
-        paraphrases = list(
-            sent_to_paragraph(
-                input_file=f"{self.backward_gen_dir}/file_{self.worker_id}_of_{self.replicas}.txt",
-                doc_len_file=f"{self.doc_len_dir}/doc_len_{self.worker_id}_of_{self.replicas}.json",
-            )
-        )
+        paraphrases = sent_to_paragraph(results)
 
         if validate_reasonable:
-            return self.select_reasonable_paraphrases(examples, paraphrases)
-        return paraphrases
+            yield from self.select_reasonable_paraphrases(datapoints, paraphrases)
+            return
 
-    def run_decoder(
-        self,
-        problem,
-        decode_hparams,
-        model_dir,
-        output_dir,
-        decode_from_file,
-        decode_to_file,
-        checkpoint_path,
-    ):
-        """
-        Execute tensor decoder
+        yield from paraphrases
 
-        If running on a TPU, will handle syncing to a remote GCP bucket that must be used as the
-        remote file system during executiion.
-
-        """
-        if self.use_tpu:        
-            _model_dir = self.sync_to_remote(model_dir, recursive=True)
-            _decode_from_file = self.sync_to_remote(decode_from_file)
-            _decode_to_file = self.randomly_generate_gcp_path()
-            _output_dir = self.randomly_generate_gcp_path()
-        else:
-            _model_dir = model_dir
-            _decode_from_file = decode_from_file
-            _decode_to_file = decode_to_file
-            _output_dir = output_dir
-
-        hparams_set = "transformer_big_tpu" if self.use_tpu else "transformer_big"
-
-        call_parameters = [
-            "t2t-decoder",
-            f"--problem={problem}",
-            "--model=transformer",
-            f"--hparams_set={hparams_set}",
-            f"--hparams=sampling_method=random,sampling_temp={self.sampling_temp}",
-            f"--decode_hparams={decode_hparams}",
-            f"--checkpoint_path={_model_dir}/{checkpoint_path}",
-            f"--output_dir={_output_dir}",
-            f"--decode_from_file={_decode_from_file}",
-            f"--decode_to_file={_decode_to_file}",
-            f"--data_dir={_model_dir}",
-        ]
-
-        if self.use_gpu:
-            call_parameters.append(f"--gpu-count={self.gpu_count}")
-        elif self.use_tpu:
-            call_parameters.append(f"--use-tpu=True")
-            call_parameters.append(f"--cloud_tpu_name={self.tpu_storage_bucket}")
-
-        call(call_parameters)
-
-        if self.use_tpu:
-            self.sync_to_local(_decode_to_file, decode_to_file)
-            self.sync_to_local(_output_dir, output_dir, recursive=True)
-
-    def sync_to_remote(self, local_file, recursive=False):
-        remote_path = self.randomly_generate_gcp_path()
-
-        commands = [
-            "gsutil",
-            "cp",
-        ]
-
-        if recursive:
-            commands.append("-r")
-
-        commands += [
-            local_file,
-            remote_path,
-        ]
-
-        print("will sync remote", commands)
-
-        call(commands)
-
-        return remote_path
-
-    def sync_to_local(self, remote_file, local_file, recursive=False):
-        commands = [
-            "gsutil",
-            "cp",
-        ]
-
-        if recursive:
-            commands.append("-r")
-
-        commands += [
-            remote_file,
-            local_file,
-        ]
-
-        call(commands)
-
-    def randomly_generate_gcp_path(self):
-        remote_path = uuid4()
-        return f"gs://{self.tpu_storage_bucket}/{remote_path}"
+    @staticmethod
+    def chunk_list(l, n):
+        for i in range(0, len(l), n):
+            yield l[i:i + n]
 
     def replace_with_paraphrase(
         self, 
@@ -249,23 +170,32 @@ class BackTranslate(AugmentationBase):
     
         return True
 
-    def select_reasonable_paraphrases(self, examples, paraphrases):
+    def select_reasonable_paraphrases(self, datapoints, translations):
         """
         Some paraphrases aren't resonable since they diverge so much from the original
         text passage in terms of length or other composition.  Limit ourselves to just
         using the ones that are valid.
 
         """
-        assert len(examples) == len(paraphrases)
+        for datapoint, translated_datapoints in zip(datapoints, translations):
+            augmented_datapoints = []
 
-        return [
-            (
-                paraphrase
-                if self.replace_with_paraphrase(
-                    example,
-                    paraphrase,
+            for translated_datapoint in translated_datapoints:
+                text = (
+                    translated_datapoint.text
+                    if self.replace_with_paraphrase(
+                        datapoint.text,
+                        translated_datapoint.text,
+                    )
+                    else datapoint.text
                 )
-                else example
-            )
-            for example, paraphrase in zip(examples, paraphrases)
-        ]
+
+                augmented_datapoints.append(
+                    AugmentedDatapoint(
+                        identifier=datapoint.identifier,
+                        augmented_index=translated_datapoint.augmented_index,
+                        text=text
+                    )
+                )
+
+            yield augmented_datapoints

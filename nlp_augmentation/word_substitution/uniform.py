@@ -1,12 +1,15 @@
 from nlp_augmentation.word_substitution.base import WordSubstitutionBase
 from nlp_augmentation.base import AugmentationBase
 import numpy as np
+from nlp_augmentation.data_models import AugmentedDatapoint
 
 
 class UniformWordSubstitution(AugmentationBase, WordSubstitutionBase):
     """Uniformly replace word with random words in the vocab."""
 
-    def __init__(self, token_prob, vocab):
+    def __init__(self, augmentations, token_prob, vocab):
+        super().__init__(augmentations=augmentations)
+
         self.token_prob = token_prob
         self.vocab_size = len(vocab)
         self.vocab = vocab
@@ -18,7 +21,14 @@ class UniformWordSubstitution(AugmentationBase, WordSubstitutionBase):
 
     def __call__(self, examples):
         return [
-            " ".join(self.replace_tokens(example.split()))
+            [
+                AugmentedDatapoint(
+                    identifier=example.identifier,
+                    augmented_index=augmented_index,
+                    text=" ".join(self.replace_tokens(example.text.split()))
+                )
+                for augmented_index in range(self.augmentations)
+            ]
             for example in examples
         ]
 

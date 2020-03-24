@@ -3,12 +3,14 @@ from nlp_augmentation.base import AugmentationBase
 from collections import defaultdict
 import numpy as np
 from math import log
+from nlp_augmentation.data_models import AugmentedDatapoint
+
 
 class TfIdfWordSubstitution(AugmentationBase, WordSubstitutionBase):
     """TF-IDF Based Word Replacement."""
 
-    def __init__(self, token_prob):
-        super().__init__()
+    def __init__(self, augmentations, token_prob):
+        super().__init__(augmentations=augmentations)
 
         self.token_prob = token_prob
         data_stats = None
@@ -53,18 +55,31 @@ class TfIdfWordSubstitution(AugmentationBase, WordSubstitutionBase):
 
     def __call__(self, examples):
         assert self.data_stats is not None
-        return [self.process_example(example) for example in examples]
+        return [
+            [
+                AugmentedDatapoint(
+                    identifier=example.identifier,
+                    augmented_index=augmented_index,
+                    text=self.process_example(example.text)
+                )
+                for augmented_index in range(self.augmentations)
+            ]
+            for example in examples
+        ]
 
     def process_example(self, example):
         all_words = example.split()
 
-        replace_prob = self.get_replace_prob(all_words)
-        replaced_words = self.replace_tokens(
-            all_words,
-            replace_prob[:len(all_words)],
-        )
+        try:
+            replace_prob = self.get_replace_prob(all_words)
+            replaced_words = self.replace_tokens(
+                all_words,
+                replace_prob[:len(all_words)],
+            )
 
-        return " ".join(replaced_words)
+            return " ".join(replaced_words)
+        except RuntimeError:
+            return " "
 
     def replace_tokens(self, word_list, replace_prob):
         """Replace tokens in a sentence."""

@@ -20,25 +20,17 @@ import json
 import os
 import tempfile
 
-import nltk
-import tensorflow as tf
+from nltk.tokenize import sent_tokenize
+from typing import Iterable
+from nlp_augmentation.data_models import Datapoint, SentenceDatapoint
 
 
 class SplitParagraphs:
-    def __init__(self, replicas=1, worker_id=0):
-        """
-        :param replicas: An argument for parallel preprocessing. For example, when replicas=3, we
-            divide the data into three parts, and only process one part according to the worker_id.
-        :param worker_id: An argument for parallel preprocessing. See 'replicas' for more details
-
-        """
-        self.replicas = replicas
-        self.worker_id = worker_id
-
     def split_sent_by_punc(self, sent, punc, offset):
         """Further split sentences when nltk's sent_tokenizer fail."""
         sent_list = []
         start = 0
+
         while start < len(sent):
             if punc:
                 pos = sent.find(punc, start + offset)
@@ -50,52 +42,24 @@ class SplitParagraphs:
             else:
                 sent_list += [sent[start:]]
                 break
+
         return sent_list
 
-    def divide_data_for_worker(self, contents):
-        data_per_worker = len(contents) // self.replicas
-        remainder = len(contents) - self.replicas * data_per_worker
-        worker_id = self.worker_id
-        if worker_id < remainder:
-            start = (data_per_worker + 1) * worker_id
-            end = (data_per_worker + 1) * (worker_id + 1)
-        else:
-            start = data_per_worker * worker_id + remainder
-            end = data_per_worker * (worker_id + 1) + remainder
-        if worker_id == self.replicas - 1:
-            assert end == len(contents)
-        contents = contents[start: end]
-        return contents
-
-    def __call__(self, input_file, doc_len_file, output_file):
-        """
-        :param input_file: The file to be back translated.
-        :param doc_len_file: The directory that stores the information of the splitted paragraph.
-        :param output_file: The directory that stores the splitted sentences.
-
-        """
-        input_file = str(input_file)
-        doc_len_file = str(doc_len_file)
-        output_file = str(output_file)
-
-        sent_tokenizer = nltk.tokenize.sent_tokenize
-
-        with tf.gfile.Open(input_file) as inf:
-            contents = inf.readlines()
-        assert len(contents) >= self.replicas
-
-        contents = self.divide_data_for_worker(contents)
-
+    def __call__(self, paragraphs: Iterable[str]) -> Iterable[SentenceDatapoint]:
         new_contents = []
-        doc_len = []
+
         # Split paragraphs into sentences since the model is trained on sentence-level
         # translations.
-        for i in range(len(contents)):
-            contents[i] = contents[i].strip()
-            if isinstance(contents[i], bytes):
-                contents[i] = contents[i].decode("utf-8")
-            sent_list = sent_tokenizer(contents[i])
+        for paragraph in paragraphs:
+            text = paragraph.text.strip()
+
+            if isinstance(text, bytes):
+                text = text.decode("utf-8")
+
+            sentence_list = sent_tokenize(text)
+
             has_long = False
+
             for split_punc in [".", ";", ",", " ", ""]:
                 if split_punc == " " or not split_punc:
                     offset = 100
@@ -103,26 +67,20 @@ class SplitParagraphs:
                     offset = 5
                 has_long = False
                 new_sent_list = []
-                for sent in sent_list:
+                for sent in sentence_list:
                     if len(sent) < 300:
                         new_sent_list += [sent]
                     else:
                         has_long = True
                         sent_split = self.split_sent_by_punc(sent, split_punc, offset)
                         new_sent_list += sent_split
-                sent_list = new_sent_list
+                sentence_list = new_sent_list
                 if not has_long:
                     break
 
-            # free up memory
-            contents[i] = None
-            doc_len += [len(sent_list)]
-            #  nltk.sent_tokenize in python2 will omit some unicode characters
-            for st in sent_list:
-                new_contents += [st]
-
-        with tf.gfile.Open(output_file, "w") as ouf:
-            for st in new_contents:
-                ouf.write(st + "\n")
-        with tf.gfile.Open(doc_len_file, "w") as ouf:
-            json.dump(doc_len, ouf)
+            for i, sentence in enumerate(sentence_list):
+                yield SentenceDatapoint(
+                    text=sentence,
+                    sentence_index=i,
+                    datapoint_identifier=paragraph.identifier,
+                )

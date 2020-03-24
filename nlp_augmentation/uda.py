@@ -3,7 +3,6 @@ from tempfile import TemporaryFile, TemporaryDirectory
 from zipfile import ZipFile
 
 from click import group, option, Path as ClickPath, Choice
-from requests import get
 from tqdm import tqdm
 from json import loads as json_loads, dumps as json_dumps
 from random import choices
@@ -11,6 +10,7 @@ from itertools import chain, groupby
 
 from nlp_augmentation.backtranslation.backtranslate import BackTranslate
 from nlp_augmentation.word_substitution.tfidf import TfIdfWordSubstitution
+from nlp_augmentation.data_models import Datapoint
 
 
 @group()
@@ -27,14 +27,13 @@ def uda():
     type=Choice([
         "cpu",
         "gpu",
-        "tpu",
     ]),
     required=True,
     default="cpu",
 )
-@option("--tpu_cloud_name", type=str, default=None)
-@option("--tpu_storage_bucket", type=str, default=None)
-def augment(input_path, augmentation_count, output_path, method, tpu_cloud_name, tpu_storage_bucket):
+@option("--gpu-count", type=int, default=None)
+@option("--workers", type=int, default=1)
+def augment(input_path, augmentation_count, output_path, method, gpu_count, workers):
     """
     CLI utility to augment the text contents of an input file.  Expects a `.jsonl` file with
     each line containing a `text` key with the text that should be supplemented.
@@ -51,37 +50,27 @@ def augment(input_path, augmentation_count, output_path, method, tpu_cloud_name,
         for line in file:
             examples.append(json_loads(line)["text"])
 
-    translation_techniques = ["backtranslation", "tfidf"]
+    # We generate a consistent number of examples using each augmentation technique
+    # Sample our scheme here
+    augmentation_techniques = ["backtranslation", "tfidf"]
+    augmentation_schemes = choices(augmentation_techniques, k=augmentation_count)
 
-    # Keep track of the transformations that will be applied to each example
-    # Indexed in the same order as the examples themselves
-    # [[backtranslation, backtranslation, tfidf], ...]
-    augmentation_per_example = [
-        choices(translation_techniques, k=augmentation_count)
-        for _ in range(len(examples))
-    ]
-
-    scratch_path = TemporaryDirectory()
-
-    backtranslation_configuration_dir = {
-        "gpu": {
-            "use_gpu": True,
-            "gpu_count": 1,
-        },
-        "tpu": {
-            "use_tpu": True,
-            "tpu_cloud_name": tpu_cloud_name,
-            "tpu_storage_bucket": tpu_storage_bucket,
-        }
+    scheme_count = {
+        scheme: augmentation_schemes.count(scheme)
+        for scheme in augmentation_techniques
     }
 
     backtranslation = BackTranslate(
-        model_dir=Path("~/.nlp_augmentation/checkpoints").expanduser(),
-        scratch_dir=scratch_path.name,
-        **backtranslation_configuration_dir.get(method, {})
+        augmentations=scheme_count["backtranslation"],
+        workers=workers,
+        use_gpu=(method == "gpu"),
+        gpu_count=gpu_count,
     )
 
-    word_replacement = TfIdfWordSubstitution(0.7)
+    word_replacement = TfIdfWordSubstitution(
+        augmentations=scheme_count["tfidf"],
+        token_prob=0.7
+    )
     word_replacement.fit(examples)
 
     augmentation_outputs = chain(
@@ -89,57 +78,30 @@ def augment(input_path, augmentation_count, output_path, method, tpu_cloud_name,
             "backtranslation",
             backtranslation,
             examples,
-            augmentation_per_example
         ),
         perform_augmentation(
             "tfidf",
             word_replacement,
             examples,
-            augmentation_per_example
         )
     )
 
-    augmentation_outputs = sorted(augmentation_outputs, key=lambda x: x[0])
-    augmentation_outputs = groupby(augmentation_outputs, lambda x: x[0])
+    augmentation_outputs = sorted(augmentation_outputs, key=lambda x: x[0].identifier)
+    augmentation_outputs = groupby(augmentation_outputs, lambda x: x[0].identifier)
 
     # Output to disk
     with open(output_path, "w") as file:
-        for _, values in augmentation_outputs:
-            payload = json_dumps(list(values))
+        for _, datapoints in augmentation_outputs:
+            payload = json_dumps(
+                [
+                    (datapoint.text, augmentor_name)
+                    for datapoint, augmentor_name in datapoints
+                ]
+            )
             file.write(f"{payload}\n")
 
-    # Resource cleanup
-    scratch_path.cleanup()
 
-
-@uda.command()
-def download():
-    filename = "back_trans_checkpoints.zip"
-    url = f"https://storage.googleapis.com/uda_model/text/{filename}"
-
-    request = get(url, stream=True)
-
-    total_size = int(request.headers.get("content-length", 0))
-    block_size = 1024
-    progress_bar = tqdm(total=total_size, unit="iB", unit_scale=True)
-
-    augmentation_path = Path("~/.nlp_augmentation").expanduser()
-    checkpoints_path = augmentation_path / "checkpoints"
-
-    # Download zip file to temporary path so if the process is inturrupted, it will
-    # be automatically garbage collected
-    with TemporaryFile() as file:
-        for data in request.iter_content(block_size):
-            progress_bar.update(len(data))
-            file.write(data)
-
-        progress_bar.close()
-        file.seek(0)
-
-        ZipFile(file).extractall(augmentation_path)
-
-
-def perform_augmentation(augmentor_name, augmentor, examples, augmentation_per_example):
+def perform_augmentation(augmentor_name, augmentor, examples):
     """
     Executes the given augmentor on the specified examples
 
@@ -147,19 +109,18 @@ def perform_augmentation(augmentor_name, augmentor, examples, augmentation_per_e
     the type of augmentation that was performed.
 
     """
-    # Duplicate the relevant examples for how many unique permutations we want to create    
-    # with this given augmentor
-    # [Example 1, Example 1, Example 2, Example 3, Example 3, ...]
-    augment_queue_index = [
-        example_index
-        for example_index, augmentation_types in enumerate(augmentation_per_example)
-        for augmentation_type in augmentation_types
-        if augmentation_type == augmentor_name
+    # Bundle up the datapoints that we want to augment, including their ID and how many
+    # new augmentations we want to make with this technique
+    augment_queue_text = [
+        Datapoint(
+            identifier=example_index,
+            text=example_text
+        )
+        for example_index, example_text in enumerate(examples)
     ]
-
-    augment_queue_text = [examples[index] for index in augment_queue_index]
 
     augment_output = augmentor(augment_queue_text)
 
-    for example_index, text in zip(augment_queue_index, augment_output):
-        yield example_index, text, augmentor_name
+    for datapoints in augment_output:
+        for datapoint in datapoints:
+            yield datapoint, augmentor_name
