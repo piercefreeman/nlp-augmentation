@@ -2,6 +2,7 @@ from nlp_augmentation.word_substitution.base import WordSubstitutionBase
 from nlp_augmentation.base import AugmentationBase
 import numpy as np
 from nlp_augmentation.data_models import AugmentedDatapoint
+from tqdm import tqdm
 
 
 class UniformWordSubstitution(AugmentationBase, WordSubstitutionBase):
@@ -29,7 +30,7 @@ class UniformWordSubstitution(AugmentationBase, WordSubstitutionBase):
                 )
                 for augmented_index in range(self.augmentations)
             ]
-            for example in examples
+            for example in tqdm(examples)
         ]
 
     def replace_tokens(self, tokens):

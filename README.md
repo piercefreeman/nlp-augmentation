@@ -30,13 +30,15 @@ Originally from [Google Research](https://github.com/google-research/uda).
 
 1. Either import the uda augmentation classes manually into a separate python project, or leverage the CLI to supplement a `.jsonl` file that's on disk.  Format each line with a datapoint that includes a `text` key with the text that you'd like to translate.
 
+    When executing on GPUs, we recommend one worker per GPU.
+
     ```
     {"text": "This is an example sentence to translate."}
     {"text": "This is another sentence to translate."}
     ```
 
     ```
-    uda augment --input-path ./example.jsonl --output-path ./example-supplemented.jsonl --augmentation-count 5 [--method gpu --gpu-count 1] [--workers 2]
+    uda augment --input-path ./example.jsonl --output-path ./example-supplemented.jsonl --backtranslation-count 5 --tfidf-count 5 [--method gpu --gpu-count 1] [--workers 2]
      ```
 
 ## Linting / Testing

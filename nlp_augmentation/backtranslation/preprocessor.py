@@ -16,16 +16,17 @@
 Split the paragraph into sentences for back translation.
 
 """
-import json
-import os
-import tempfile
-
+from tqdm import tqdm
 from nltk.tokenize import sent_tokenize
-from typing import Iterable
+from typing import Iterable, List
 from nlp_augmentation.data_models import Datapoint, SentenceDatapoint
+from multiprocessing import Pool
 
 
 class SplitParagraphs:
+    def __init__(self, workers):
+        self.workers = workers
+
     def split_sent_by_punc(self, sent, punc, offset):
         """Further split sentences when nltk's sent_tokenizer fail."""
         sent_list = []
@@ -45,39 +46,46 @@ class SplitParagraphs:
 
         return sent_list
 
-    def __call__(self, paragraphs: Iterable[str]) -> Iterable[SentenceDatapoint]:
+    def convert_paragraph(self, paragraph):
+        text = paragraph.text.strip()
+
+        if isinstance(text, bytes):
+            text = text.decode("utf-8")
+
+        sentence_list = sent_tokenize(text)
+
+        has_long = False
+
+        for split_punc in [".", ";", ",", " ", ""]:
+            if split_punc == " " or not split_punc:
+                offset = 100
+            else:
+                offset = 5
+            has_long = False
+            new_sent_list = []
+            for sent in sentence_list:
+                if len(sent) < 300:
+                    new_sent_list += [sent]
+                else:
+                    has_long = True
+                    sent_split = self.split_sent_by_punc(sent, split_punc, offset)
+                    new_sent_list += sent_split
+            sentence_list = new_sent_list
+            if not has_long:
+                break
+
+        return sentence_list
+
+    def __call__(self, paragraphs: List[str]) -> Iterable[SentenceDatapoint]:
         new_contents = []
+
+        pool = Pool(self.workers)
 
         # Split paragraphs into sentences since the model is trained on sentence-level
         # translations.
-        for paragraph in paragraphs:
-            text = paragraph.text.strip()
+        sentence_lists = tqdm(pool.imap(self.convert_paragraph, paragraphs), total=len(paragraphs))
 
-            if isinstance(text, bytes):
-                text = text.decode("utf-8")
-
-            sentence_list = sent_tokenize(text)
-
-            has_long = False
-
-            for split_punc in [".", ";", ",", " ", ""]:
-                if split_punc == " " or not split_punc:
-                    offset = 100
-                else:
-                    offset = 5
-                has_long = False
-                new_sent_list = []
-                for sent in sentence_list:
-                    if len(sent) < 300:
-                        new_sent_list += [sent]
-                    else:
-                        has_long = True
-                        sent_split = self.split_sent_by_punc(sent, split_punc, offset)
-                        new_sent_list += sent_split
-                sentence_list = new_sent_list
-                if not has_long:
-                    break
-
+        for paragraph, sentence_list in zip(paragraphs, sentence_lists):
             for i, sentence in enumerate(sentence_list):
                 yield SentenceDatapoint(
                     text=sentence,

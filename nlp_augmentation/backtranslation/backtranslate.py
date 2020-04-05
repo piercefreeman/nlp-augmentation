@@ -64,8 +64,8 @@ class BackTranslate(AugmentationBase):
         datapoints = list(datapoints)
 
         secho("*** splitting paragraphs into sentences ***", fg="green")
-        split_paragraphs = SplitParagraphs()
-        sentences = list(tqdm(split_paragraphs(paragraphs=datapoints)))
+        split_paragraphs = SplitParagraphs(workers=self.workers)
+        sentences = list(split_paragraphs(paragraphs=datapoints))
 
         # Pre-download the models locally before we split into workers so we don't have an
         # intra-worker race condition to download the files
